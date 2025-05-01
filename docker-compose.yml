@@ -1,0 +1,15 @@
+services:
+    langchain4survey:
+      build:
+        context: .
+        dockerfile: Dockerfile
+      volumes:
+        - .:/home
+      working_dir: /home
+      ports:
+      - 8000:8000
+      stdin_open: true
+      tty: true
+      environment:
+        - OPENAI_API_KEY=${OPENAI_API_KEY}
+        - PUBMED_EUTILS_API_KEY=${PUBMED_EUTILS_API_KEY}

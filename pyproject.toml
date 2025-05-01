@@ -1,0 +1,27 @@
+[project]
+name = "langchain4survey"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Junnosuke Imai"}
+]
+license = {text = "none"}
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "biopython (>=1.85,<2.0)",
+    "python-dotenv (>=1.1.0,<2.0.0)",
+    "black (>=25.1.0,<26.0.0)",
+    "isort (>=6.0.1,<7.0.0)",
+    "jupyter (>=1.1.1,<2.0.0)",
+    "langchain (>=0.3.24,<0.4.0)",
+    "langchain-community (>=0.3.23,<0.4.0)",
+    "openai (>=1.76.2,<2.0.0)",
+    "langchain-openai (>=0.3.14,<0.4.0)",
+    "tree (>=0.2.4,<0.3.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
