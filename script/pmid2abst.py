@@ -14,6 +14,9 @@ from langchain_openai import ChatOpenAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.summarize import load_summarize_chain
 from langchain.prompts import PromptTemplate
+from langchain.docstore.document import Document
+from langchain.prompts import PromptTemplate
+
 # JsonOutputParse のインポートは不要なため削除
 
 def get_article_info(pmid):
@@ -57,7 +60,7 @@ def get_article_info(pmid):
         elif last_name is not None:
             authors.append(last_name.text.strip())
     
-    # アブストラクト取得
+    # アブストラクト
     abstract_texts = []
     for abstract_section in root.findall(".//Abstract"):
         for abstract_text in abstract_section.findall("AbstractText"):
@@ -94,28 +97,57 @@ def get_full_text_by_pmcid(pmcid):
         return None
     body_elem = root.find(".//body")
     if body_elem is not None:
+#        print(body_elem.itertext())
         full_text = "".join(body_elem.itertext()).strip()
         if full_text:
             return full_text
     return None
 
-def split_text(text):
+def split_text4LLM(text):
     """
-    指定したテキストを分割する（現在使用していません）
+    指定した文章を分割する
     """
-    return text
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=2000,
+        chunk_overlap=200,
+        length_function=len,
+        separators=["\n\n\n","\n\n", "\n"]
+    )
+    texts = text_splitter.split_text(text)
+    print(len(texts))
+    return texts
 
 def summarize_text(text):
-    """
-    指定した文章をLangChainとGPTを用いて要約する
-    """
-    prompt_template = "はじめにこの論文の対象とする細胞、実験方法、データの種類、データ解析方法、対象とする生物学的機構を箇条書きにして出力してください。その後この論文で言及されていることを5000文字でまとめて説明してください。説明の中にはこの研究分野で何ができるようになって、何が課題になっているかも含めてください。:\n\n{text}\n\n要約:"
-    prompt = PromptTemplate(input_variables=["text"], template=prompt_template)
-    llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
-    # チャット形式のメッセージとして渡す
-    messages = [{"role": "user", "content": prompt.format(text=text)}]
-    result = llm.invoke(messages)
-    # 結果を処理。返り値がリストの場合は、先頭のメッセージのcontentを返す
+    splitted_text = split_text4LLM(text)
+    documents = []
+    for doc in splitted_text:
+        if hasattr(doc, "page_content"):
+            documents.append(doc)
+        else:
+            documents.append(Document(page_content=doc))
+    map_prompt = PromptTemplate(
+        input_variables=["text"],
+        template="""各チャンクの内容を詳しく要約してください。
+        入力:
+        {text}
+        要約:
+        """
+    )
+    reduce_prompt = PromptTemplate(
+        input_variables=["text"],
+        template="""
+        以下の各チャンクの要約を基に、最終的な論文の要約を作成してください。要約の手順は以下に従ってください。
+        1.各チャンクの要約を元に論文の各章ごとに5段程度に詳細に要約してください。
+        2.実験方法、データの種類、データ解析方法、対象とする生物学的機構を箇条書きにしてください。
+        3.論文の要約にこの研究分野で進展したことと何が課題となっているのかを含めてください。
+        入力:
+        {text}
+        最終要約:
+        """
+    )
+    llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
+    chain = load_summarize_chain(llm, chain_type="map_reduce", map_prompt=map_prompt, combine_prompt=reduce_prompt)
+    result = chain.invoke(documents)
     if isinstance(result, list) and len(result) > 0:
         outputs = []
         for item in result:
@@ -162,6 +194,7 @@ def main():
 #            print(full_text)
             try:
                 summary = summarize_text(full_text)
+
             except Exception as e:
                 print(f"要約生成中にエラーが発生しました: {e}")
         else:
@@ -179,7 +212,7 @@ def main():
             print("アブストラクト本文が見つかりませんでした。")
     if summary:
         print("\n ChatGPT Summary")
-        print(summary.content)
+        print(summary.output_text)
         print("Abstract text")
         print(info.get('abstract'))
     else:
