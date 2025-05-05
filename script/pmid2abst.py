@@ -170,34 +170,68 @@ def refine_summarize_text(text):
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=2000,
         chunk_overlap=200,
-        separators=["\n\n\n", "\n\n", "\n"]
+        separators=["\n\n\n", "\n\n"]
     )
     documents = [Document(page_content=chunk) for chunk in splitter.split_text(text)]
     initial_prompt = PromptTemplate(
         input_variables=["text"],
         template="""
-以下のテキストの内容を要約してください。
+あなたは、iPS細胞を対象とした分子生物学と細胞生物学の研究者です。以下の入力する論文の内容を他分野の研究者が理解できるように詳細に要約してください。また、要約の手順は以下に従ってください。
+1. 以下の条件に則って各段落ごとに詳細に説明をしてください。
+- 各段落を1000文字以上で説明
+- バックグラウンドとなる生物学的な制御機構の情報を含めて説明
+2. 以下の項目について論文中からそのまま抜き出して列挙してください。
+- 研究の目的
+- 対象とする細胞
+- 登場する分子名
+- 登場する分子が行う生物学的な制御機構
+- 実験方法
+- データの種類
+- データ解析方法
+3. この論文で示しているこの研究で現時点で明らかとなったことを詳細に要約してください。
+4. この論文で示している制約や今後明らかにしなくてはならない研究課題を詳細に要約してください
 入力:
 {text}
 要約:
+
 """
     )
     refine_prompt = PromptTemplate(
         input_variables=["text", "existing_summary"],
         template="""
-以下のテキストの内容を精査し、既存の要約を改善してください。
-入力:
+あなたは、iPS細胞を対象とした分子生物学と細胞生物学の研究者です。以下の入力する論文の内容を他分野の研究者が理解できるように、既存の要約を改善してください。要約を改善する際に以下の条件に従ってください。
+1. 現在の要約の内容に不足している内容があったら追加で2000文字以上で説明してください。
+   - バックグラウンドとなる生物学的な制御機構の情報を含めて説明
+   - 研究の目的
+   - 対象とする細胞
+   - 登場する分子名
+   - 登場する分子が行う生物学的な制御機構
+   - 実験方法
+   - データの種類
+   - データ解析方法
+2. 最終的な要約に以下の項目を論文中からそのまま抜き出して列挙してください。
+   - 研究の目的
+   - 対象とする細胞
+   - 登場する分子名
+   - 登場する分子が行う生物学的な制御機構
+   - 実験方法
+   - データの種類
+   - データ解析方法
+3. 最終的な要約には各段落ごとに詳細に1000文字以上で説明してください。
+3. この論文で示している、現時点で明らかとなったことを詳細に要約してください。
+4. この論文で示している制約や、今後明らかにしなくてはならない研究課題を詳細に要約してください
+
+新しい内容:
 {text}
-既存の要約:
+現在の要約:
 {existing_summary}
-最終要約:
 """
     )
     llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
     chain = load_summarize_chain(
         llm, 
         chain_type="refine", 
-        initial_prompt=initial_prompt, 
+        question_prompt=initial_prompt, 
         refine_prompt=refine_prompt
     )
     result = chain.invoke(documents)
@@ -258,14 +292,14 @@ def main():
         sys.exit(1)
 
     # タイトルと著者情報を表示
-    print("\n【タイトル】")
+    print("【タイトル】")
     print(info.get('title') if info.get('title') else "タイトルが見つかりませんでした。")
-    print("\n【著者情報】")
+    print("【著者情報】")
     if info.get('authors'):
         print(", ".join(info.get('authors')))
     else:
         print("著者情報が見つかりませんでした。")
-    print("\n【PMCID】")
+    print("【PMCID】")
     print(info.get('pmcid'))
 
     # 本文および要約を取得
@@ -284,7 +318,7 @@ def main():
             print("\n【全文が取得できませんでした】")
     if not summary:
         if info.get('abstract'):
-            print("\n【アブストラクト本文】")
+            print("【アブストラクト本文】")
             print(info.get('abstract'))
             try:
                 if chain_type.lower() == "refine":
@@ -296,7 +330,7 @@ def main():
         else:
             print("アブストラクト本文が見つかりませんでした。")
     if summary:
-        print("\n ChatGPT Summary")
+        print("ChatGPT Summary")
         print(summary)
         print("Abstract text")
         print(info.get('abstract'))
