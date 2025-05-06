@@ -12,11 +12,14 @@
 
 ### 最近の修正点
 
-- プレーンなテキストとして文書を渡すのではなく、入力辞書のキーを **"context"** に統一するように変更しました。  
-  これは、RefineDocumentsChain や StuffDocumentsChain が内部で **"context"** と **"question"** の入力変数名を期待しているためです。  
+- 入力辞書のキーを **"context"** に統一するように変更しました。  
+  これにより、RefineDocumentsChain や StuffDocumentsChain が内部で **"context"** と **"question"** の入力変数名を期待しているため、一貫して正しい形式で入力が渡されるようになりました。  
   - 例えば、`summarize_text` 関数では、`chain.invoke([{"context": text}])` の形でテキストが渡されます。
-  - また、`refine_summarize_text` 関数では、各チャンクの Document の内容が **{"context": doc.page_content}** として渡され、RefineDocumentsChain が期待する変数名に合わせています。
-
+  - また、`refine_summarize_text` 関数では、各チャンクの Document の内容が **{"context": doc.page_content}** として渡され、RefineDocumentsChain が期待する変数名に合わせています.
+  
+- 出力先の変更:  
+  以前は標準出力へ要約結果を表示していましたが、現在の修正では、`def main()` 内で出力がファイルへ書き出されるようになりました。  
+  出力ファイルの名前は、実行時の引数に基づいて決定され、チェーンタイプが指定された場合は `chain_type` と PubMedID をアンダースコアで連結したもの（例: `refine_12345678.markdown`）、指定がない場合は PubMedID 単体（例: `12345678.markdown`）となっています.
 これにより、PMID 33221939 や PMID 32598085 など、複数の文献に対して一貫して正しく要約テキストがパースされるようになりました。
 
 ## Docker と Poetry の利用

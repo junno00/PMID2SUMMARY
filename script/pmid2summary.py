@@ -182,9 +182,9 @@ def refine_summarize_text(text):
     refineチェーンは、初期要約に対して追加情報を統合し、より洗練された要約を生成します。
     """
     question = """
-この論文の各段落を、日本語で1000文字以上に要約してください。
-
+あなたは、iPS細胞を対象とした分子生物学と細胞生物学の研究者です。以下の文書内容をもとに、他分野の研究者でも理解できるように、下記の出力ルールに従って詳細に要約してください
 【出力ルール】
+- この論文の各段落を、日本語で1000文字以上で詳細に要約してください。
 - 各段落には「段落1:」「段落2:」のように番号付きの見出しをつけてください。
 - 論文に章構成（序論・方法・結果・考察など）がある場合は、それに従って章見出しを「第1章：〜」のように明示してください。
 - 各段落の要約には、生物学的背景、使用された手法、目的、結果、議論、限界を含めてください。
@@ -271,27 +271,31 @@ def main():
     if len(sys.argv) == 3:
         chain_type = sys.argv[1]
         pmid = sys.argv[2]
+        outfile = f"{chain_type}_{pmid}.md"
     else:
         chain_type = "stuff"
         pmid = sys.argv[1]
+        outfile = f"{pmid}.md"
+
+    output_lines = []
 
     info = get_article_info(pmid)
     if not info:
-        print("文献情報が取得できませんでした。")
+        output_lines.append("文献情報が取得できませんでした。")
+        with open(outfile, "w", encoding="utf-8") as f:
+            f.write("\n".join(output_lines))
         sys.exit(1)
 
-    # タイトルと著者情報を表示
-    print("【タイトル】")
-    print(info.get('title') if info.get('title') else "タイトルが見つかりませんでした。")
-    print("【著者情報】")
+    output_lines.append("【タイトル】")
+    output_lines.append(info.get('title') if info.get('title') else "タイトルが見つかりませんでした。")
+    output_lines.append("【著者情報】")
     if info.get('authors'):
-        print(", ".join(info.get('authors')))
+        output_lines.append(", ".join(info.get('authors')))
     else:
-        print("著者情報が見つかりませんでした。")
-    print("【PMCID】")
-    print(info.get('pmcid'))
+        output_lines.append("著者情報が見つかりませんでした。")
+    output_lines.append("【PMCID】")
+    output_lines.append(str(info.get('pmcid')))
 
-    # 本文および要約を取得
     summary = None
     if info.get('pmcid') != "No_PMCID":
         full_text = get_full_text_by_pmcid(info.get('pmcid'))
@@ -302,29 +306,30 @@ def main():
                 else:
                     summary = summarize_text(full_text)
             except Exception as e:
-                print(f"要約生成中にエラーが発生しました: {e}")
+                output_lines.append(f"要約生成中にエラーが発生しました: {e}")
         else:
-            print("\n【全文が取得できませんでした】")
+            output_lines.append("【全文が取得できませんでした】")
     if not summary:
         if info.get('abstract'):
-            print("【アブストラクト本文】")
-            print(info.get('abstract'))
+            output_lines.append("【アブストラクト本文】")
+            output_lines.append(info.get('abstract'))
             try:
                 if chain_type.lower() == "refine":
                     summary = refine_summarize_text(info.get('abstract'))
                 else:
                     summary = summarize_text(info.get('abstract'))
             except Exception as e:
-                print(f"要約生成中にエラーが発生しました: {e}")
+                output_lines.append(f"要約生成中にエラーが発生しました: {e}")
         else:
-            print("アブストラクト本文が見つかりませんでした。")
+            output_lines.append("アブストラクト本文が見つかりませんでした。")
     if summary:
-        print("# ChatGPT Summary")
-        print(summary)
-        print("Abstract text")
-        print(info.get('abstract'))
+        output_lines.append("# ChatGPT Summary")
+        output_lines.append(summary)
     else:
-        print("要約が取得できませんでした。")
+        output_lines.append("要約が取得できませんでした。")
+
+    with open(outfile, "w", encoding="utf-8") as f:
+        f.write("\n".join(output_lines))
 
 if __name__ == "__main__":
     main()
