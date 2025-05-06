@@ -15,6 +15,7 @@ from langchain_openai import ChatOpenAI
 from langchain.chains.summarize import load_summarize_chain
 from langchain.prompts import PromptTemplate
 from langchain.docstore.document import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # JsonOutputParse のインポートは不要なため削除
 
@@ -101,178 +102,146 @@ def get_full_text_by_pmcid(pmcid):
             return full_text
     return None
 
+def parse_result(result):
+    """
+    再帰的に辞書やリストから適切な要約テキストを抽出する関数。
+    複数のキー（"output_text", "text", "summary", "result", "content" など）を優先順位順にチェックする。
+    """
+    if isinstance(result, str):
+        return result.strip()
+    elif isinstance(result, dict):
+        # 優先順位の高いキーをチェックする
+        for key in ["output_text", "text", "summary", "result"]:
+            if key in result and isinstance(result[key], str) and result[key].strip():
+                return result[key].strip()
+        # "content"キーがあれば再帰的に探索
+        if "content" in result:
+            parsed = parse_result(result["content"])
+            if parsed:
+                return parsed
+        # それ以外の全キーを再帰的に探索
+        for key, value in result.items():
+            parsed = parse_result(value)
+            if parsed:
+                return parsed
+        return ""
+    elif isinstance(result, list):
+        for item in result:
+            parsed = parse_result(item)
+            if parsed:
+                return parsed
+        return ""
+    else:
+        return str(result).strip()
+
 def summarize_text(text):
     """
-    テキストをそのままLLMに渡して、指定のプロンプト（reduce_prompt）で要約を生成する。
-    テキスト分割やmapreduceの機能は使用しない。chain_typeは"stuff"を用いる。
+    テキストをLLMに渡し、reduceチェーンを用いて要約を生成します。
     """
     document = Document(page_content=text)
     reduce_prompt = PromptTemplate(
-        input_variables=["text"],
+        input_variables=["context"],
         template="""
 以下のテキストの内容を要約してください。要約は以下の手順に従って作成してください。
 1. 論文の各章ごとに5段程度に詳しく要約すること。
 2. 実験方法、データの種類、データ解析方法、対象とする生物学的機構を箇条書きにすること。
 3. 研究分野での進展と今後の課題も含めること。
 入力:
-{text}
+{context}
 要約:
 """
     )
     llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
-    chain = load_summarize_chain(llm, chain_type="stuff", prompt=reduce_prompt)
+    chain = load_summarize_chain(llm, chain_type="stuff",
+                                 prompt=reduce_prompt,
+                                 document_variable_name="context",)
     result = chain.invoke([document])
-    if isinstance(result, str):
-        return result
-    elif isinstance(result, dict):
-        if "output_text" in result:
-            return result["output_text"]
-        elif "content" in result:
-            content_val = result["content"]
-            if isinstance(content_val, dict):
-                if "output_text" in content_val:
-                    return content_val["output_text"]
-                else:
-                    def search_output(obj):
-                        if isinstance(obj, dict):
-                            if "output_text" in obj:
-                                return obj["output_text"]
-                            for value in obj.values():
-                                found = search_output(value)
-                                if found is not None:
-                                    return found
-                        elif isinstance(obj, list):
-                            for item in obj:
-                                found = search_output(item)
-                                if found is not None:
-                                    return found
-                        return None
-                    found = search_output(content_val)
-                    if found is not None:
-                        return found
-                    else:
-                        return str(content_val)
-            elif isinstance(content_val, str):
-                return content_val
-            else:
-                return str(content_val)
-        else:
-            return str(result)
-    else:
-        return str(result)
+    return parse_result(result)
 
 def refine_summarize_text(text):
     """
-    テキストを分割してLLMに渡し、refine chainを用いたプロンプトで要約を生成する。
-    refine chainは、初期要約に対して追加情報を統合し、より洗練された要約を生成します。
+    テキストを分割してLLMに渡し、refineチェーンを用いて要約を生成します。
+    refineチェーンは、初期要約に対して追加情報を統合し、より洗練された要約を生成します。
     """
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=2000,
-        chunk_overlap=200,
-        separators=["\n\n\n", "\n\n"]
-    )
-    documents = [Document(page_content=chunk) for chunk in splitter.split_text(text)]
-    initial_prompt = PromptTemplate(
-        input_variables=["text"],
-        template="""
-あなたは、iPS細胞を対象とした分子生物学と細胞生物学の研究者です。以下の入力する論文の内容を他分野の研究者が理解できるように詳細に要約してください。また、要約の手順は以下に従ってください。
-1. 以下の条件に則って各段落ごとに詳細に説明をしてください。
-- 各段落を1000文字以上で説明
-- バックグラウンドとなる生物学的な制御機構の情報を含めて説明
-2. 以下の項目について論文中からそのまま抜き出して列挙してください。
-- 研究の目的
+    question = """
+この論文の各段落を、日本語で1000文字以上に要約してください。
+
+【出力ルール】
+- 各段落には「段落1:」「段落2:」のように番号付きの見出しをつけてください。
+- 論文に章構成（序論・方法・結果・考察など）がある場合は、それに従って章見出しを「第1章：〜」のように明示してください。
+- 各段落の要約には、生物学的背景、使用された手法、目的、結果、議論、限界を含めてください。
+- 内容を簡略化せず、学部生・大学院生レベルの読者が理解できる粒度で解説してください。
+- 必要に応じて専門用語には簡単な補足説明を加えてください。
+- 出力形式はMarkdownに準拠してください。
+
+【まとめ】
+文献全体の中で以下の情報を、文末に明確に要約してください：
 - 対象とする細胞
 - 登場する分子名
 - 登場する分子が行う生物学的な制御機構
 - 実験方法
 - データの種類
 - データ解析方法
-3. この論文で示しているこの研究で現時点で明らかとなったことを詳細に要約してください。
-4. この論文で示している制約や今後明らかにしなくてはならない研究課題を詳細に要約してください
-入力:
-{text}
-要約:
+- この研究で明らかになったこと（1000文字程度）
+- この研究で示された研究分野の課題や制約（1000文字程度）
 
+※ 出力が途中で終わらないよう、論文の最終段落までを必ず含めてください。
 """
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=2000,
+        chunk_overlap=200,
+        separators=["\n\n\n", "\n\n"]
     )
-    refine_prompt = PromptTemplate(
-        input_variables=["text", "existing_summary"],
-        template="""
-あなたは、iPS細胞を対象とした分子生物学と細胞生物学の研究者です。以下の入力する論文の内容を他分野の研究者が理解できるように、既存の要約を改善してください。要約を改善する際に以下の条件に従ってください。
-1. 現在の要約の内容に不足している内容があったら追加で2000文字以上で説明してください。
-   - バックグラウンドとなる生物学的な制御機構の情報を含めて説明
-   - 研究の目的
-   - 対象とする細胞
-   - 登場する分子名
-   - 登場する分子が行う生物学的な制御機構
-   - 実験方法
-   - データの種類
-   - データ解析方法
-2. 最終的な要約に以下の項目を論文中からそのまま抜き出して列挙してください。
-   - 研究の目的
-   - 対象とする細胞
-   - 登場する分子名
-   - 登場する分子が行う生物学的な制御機構
-   - 実験方法
-   - データの種類
-   - データ解析方法
-3. 最終的な要約には各段落ごとに詳細に1000文字以上で説明してください。
-3. この論文で示している、現時点で明らかとなったことを詳細に要約してください。
-4. この論文で示している制約や、今後明らかにしなくてはならない研究課題を詳細に要約してください
+    documents = [Document(page_content=chunk) for chunk in splitter.split_text(text)]
 
-新しい内容:
-{text}
-現在の要約:
-{existing_summary}
+    initial_prompt = PromptTemplate(
+        input_variables=["context", "question"],
+        template="""
+あなたは、iPS細胞を対象とした分子生物学と細胞生物学の研究者です。
+以下の文書内容をもとに、他分野の研究者でも理解できるように、下記の質問に従って詳細に要約してください。
+
+【文書】
+{context}
+
+【質問】
+{question}
+
+要約:
+"""
+)
+    refine_prompt = PromptTemplate(
+        input_variables=["existing_answer", "context", "question"],
+        template="""
+あなたは、iPS細胞を対象とした分子生物学と細胞生物学の研究者です。
+以下の既存要約に続く文書情報を反映して、要約をより正確かつ包括的に改善してください。
+
+---
+
+【既存の要約】
+{existing_answer}
+
+【追加文書】
+{context}
+
+【質問】
+{question}
+
+更新後の要約:
 """
     )
     llm = ChatOpenAI(temperature=0, model_name="gpt-4o")
-    chain = load_summarize_chain(
-        llm, 
-        chain_type="refine", 
-        question_prompt=initial_prompt, 
-        refine_prompt=refine_prompt
-    )
-    result = chain.invoke(documents)
-    if isinstance(result, str):
-        return result
-    elif isinstance(result, dict):
-        if "output_text" in result:
-            return result["output_text"]
-        elif "content" in result:
-            content_val = result["content"]
-            if isinstance(content_val, dict):
-                if "output_text" in content_val:
-                    return content_val["output_text"]
-                else:
-                    def search_output(obj):
-                        if isinstance(obj, dict):
-                            if "output_text" in obj:
-                                return obj["output_text"]
-                            for value in obj.values():
-                                found = search_output(value)
-                                if found is not None:
-                                    return found
-                        elif isinstance(obj, list):
-                            for item in obj:
-                                found = search_output(item)
-                                if found is not None:
-                                    return found
-                        return None
-                    found = search_output(content_val)
-                    if found is not None:
-                        return found
-                    else:
-                        return str(content_val)
-            elif isinstance(content_val, str):
-                return content_val
-            else:
-                return str(content_val)
-        else:
-            return str(result)
+    if not documents:
+        return ""
+    if len(documents) == 1:
+        summary = load_summarize_chain(llm, chain_type="stuff", prompt=initial_prompt).invoke([documents[0]])
     else:
-        return str(result)
+        refine_chain = load_summarize_chain(llm,
+                                            chain_type="refine",
+                                            question_prompt=initial_prompt,
+                                            refine_prompt=refine_prompt,
+                                            document_variable_name="context")
+        summary = refine_chain.invoke({"input_documents": documents, "question": question})
+    return parse_result(summary)
 
 def main():
     if len(sys.argv) not in [2, 3]:
@@ -330,7 +299,7 @@ def main():
         else:
             print("アブストラクト本文が見つかりませんでした。")
     if summary:
-        print("ChatGPT Summary")
+        print("# ChatGPT Summary")
         print(summary)
         print("Abstract text")
         print(info.get('abstract'))
