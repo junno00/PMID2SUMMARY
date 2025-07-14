@@ -18,7 +18,8 @@ dependencies = [
     "langchain-community (>=0.3.23,<0.4.0)",
     "openai (>=1.76.2,<2.0.0)",
     "langchain-openai (>=0.3.14,<0.4.0)",
-    "tree (>=0.2.4,<0.3.0)"
+    "tree (>=0.2.4,<0.3.0)",
+    "pandas (>=2.2.3,<3.0.0)"
 ]
 
 

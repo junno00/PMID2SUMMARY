@@ -68,11 +68,15 @@ def get_article_info(pmid):
                 abstract_texts.append(abstract_text.text.strip())
     abstract = "\n\n".join(abstract_texts) if abstract_texts else None
 
+    # 出版年取得
+    pub_year_elem = root.find(".//Article/Journal/JournalIssue/PubDate/Year")
+    pub_year = pub_year_elem.text.strip() if pub_year_elem is not None and pub_year_elem.text else None
+
     # PMCID取得
     pmcid_elem = root.find(".//ArticleIdList/ArticleId[@IdType='pmc']")
     pmcid = pmcid_elem.text.strip() if pmcid_elem is not None and pmcid_elem.text else "No_PMCID"
 
-    return {"title": title, "authors": authors, "abstract": abstract, "pmcid": pmcid}
+    return {"title": title, "authors": authors, "abstract": abstract, "pmcid": pmcid, "pmid": pmid, "publication_year": pub_year}
 
 def get_full_text_by_pmcid(pmcid):
     """
@@ -271,7 +275,7 @@ def main():
     if len(sys.argv) == 3:
         chain_type = sys.argv[1]
         pmid = sys.argv[2]
-        outfile = f"{chain_type}_{pmid}.md"
+        outfile = f"/home/result/{chain_type}_{pmid}.md"
     else:
         chain_type = "stuff"
         pmid = sys.argv[1]
@@ -285,7 +289,8 @@ def main():
         with open(outfile, "w", encoding="utf-8") as f:
             f.write("\n".join(output_lines))
         sys.exit(1)
-
+    output_lines.append(f"【PMID】{info.get('pmid')}")
+    output_lines.append(f"【出版年】{info.get('publication_year')}")
     output_lines.append("【タイトル】")
     output_lines.append(info.get('title') if info.get('title') else "タイトルが見つかりませんでした。")
     output_lines.append("【著者情報】")
